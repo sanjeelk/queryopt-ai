@@ -69,7 +69,7 @@ function BarChart({ rows, leftKey, rightKey, labelKey, leftLabel, rightLabel, un
   if (!rows.length) return <Empty>Run a query to start collecting live chart data.</Empty>;
   const max = Math.max(1, ...rows.flatMap((row) => [Number(row[leftKey] || 0), Number(row[rightKey] || 0)]));
   return <div className="chart-bars">{rows.slice(0, 7).map((row, i) => <div className="chart-group" key={`${row[labelKey]}-${i}`}>
-    <div className="bar-pair"><div className="bar-track"><div className="bar actual" style={{ width: `${Math.max(3, Number(row[leftKey] || 0) / max * 100)}%` }} title={`${fmt(row[leftKey)} ${unit}`} /></div><div className="bar-track"><div className="bar predicted" style={{ width: `${Math.max(3, Number(row[rightKey] || 0) / max * 100)}%` }} title={`${fmt(row[rightKey)} ${unit}`} /></div></div>
+    <div className="bar-pair"><div className="bar-track"><div className="bar actual" style={{ width: `${Math.max(3, Number(row[leftKey] || 0) / max * 100)}%` }} title={`${fmt(row[leftKey])} ${unit}`} /></div><div className="bar-track"><div className="bar predicted" style={{ width: `${Math.max(3, Number(row[rightKey] || 0) / max * 100)}%` }} title={`${fmt(row[rightKey])} ${unit}`} /></div></div>
     <span className="chart-label">{row[labelKey]}</span></div>)}</div>;
 }
 
