@@ -12,16 +12,21 @@ from .db import (
     app_meta,
     customers,
     engine,
+    geolocation,
     order_items,
+    order_payments,
+    order_reviews,
     orders,
     products,
+    product_category_name_translation,
     query_measurements,
+    sellers,
 )
 
 DATASET_NAME = "Brazilian E-Commerce Public Dataset by Olist"
 DATASET_URL = "https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce"
 DATASET_LICENSE = "CC BY-NC-SA 4.0"
-BENCHMARK_VERSION = "olist-v1"
+BENCHMARK_VERSION = "olist-v2-all-tables"
 
 # Five query shapes are measured on the uploaded Olist tables. These are SQL
 # workloads, not fabricated measurement rows or pre-set performance labels.
@@ -31,6 +36,11 @@ BENCHMARK_QUERIES = [
     "SELECT c.customer_state, COUNT(DISTINCT o.order_id) AS order_count, SUM(i.price + i.freight_value) AS gross_value FROM customers c JOIN orders o ON o.customer_id = c.customer_id JOIN order_items i ON i.order_id = o.order_id GROUP BY c.customer_state ORDER BY gross_value DESC",
     "SELECT order_id, customer_id, order_purchase_timestamp, order_status FROM orders WHERE order_status = 'delivered' ORDER BY order_purchase_timestamp DESC LIMIT 100",
     "SELECT p.product_category_name, o.order_status, COUNT(*) AS item_count, AVG(i.price) AS average_price FROM order_items i JOIN products p ON p.product_id = i.product_id JOIN orders o ON o.order_id = i.order_id GROUP BY p.product_category_name, o.order_status ORDER BY item_count DESC LIMIT 100",
+    "SELECT payment_type, COUNT(*) AS payment_count, ROUND(AVG(payment_value)::numeric, 2) AS average_payment FROM order_payments GROUP BY payment_type ORDER BY payment_count DESC",
+    "SELECT r.review_score, COUNT(*) AS review_count, ROUND(AVG(p.payment_value)::numeric, 2) AS average_payment FROM order_reviews r JOIN order_payments p ON p.order_id = r.order_id GROUP BY r.review_score ORDER BY r.review_score",
+    "SELECT s.seller_state, COUNT(*) AS item_count, ROUND(SUM(i.price)::numeric, 2) AS sales FROM sellers s JOIN order_items i ON i.seller_id = s.seller_id GROUP BY s.seller_state ORDER BY sales DESC LIMIT 20",
+    "SELECT t.product_category_name_english, COUNT(*) AS products FROM product_category_name_translation t JOIN products p ON p.product_category_name = t.product_category_name GROUP BY t.product_category_name_english ORDER BY products DESC LIMIT 20",
+    "SELECT c.customer_state, COUNT(DISTINCT c.customer_id) AS customers, COUNT(g.geolocation_id) AS location_points FROM customers c JOIN geolocation g ON g.geolocation_zip_code_prefix = c.customer_zip_code_prefix GROUP BY c.customer_state ORDER BY location_points DESC LIMIT 10",
 ]
 
 
@@ -74,7 +84,11 @@ def table_sizes() -> dict[str, int]:
     with engine.connect() as connection:
         return {
             table.name: _table_count(connection, table)
-            for table in (customers, products, orders, order_items)
+            for table in (
+                customers, products, orders, order_items, order_payments,
+                order_reviews, sellers, product_category_name_translation,
+                geolocation,
+            )
         }
 
 
@@ -130,7 +144,20 @@ def dataset_metadata() -> dict:
             select(func.max(query_measurements.c.created_at))
         ).scalar_one()
 
-    loaded = all(sizes.values())
+    core_tables = ("customers", "products", "orders", "order_items")
+    additional_tables = (
+        "order_payments", "order_reviews", "sellers",
+        "product_category_name_translation", "geolocation",
+    )
+    loaded = all(sizes[name] for name in core_tables)
+    missing_additional = [name for name in additional_tables if sizes[name] == 0]
+    table_file_names = {
+        "order_payments": "olist_order_payments_dataset.csv",
+        "order_reviews": "olist_order_reviews_dataset.csv",
+        "sellers": "olist_sellers_dataset.csv",
+        "product_category_name_translation": "product_category_name_translation.csv",
+        "geolocation": "olist_geolocation_dataset.csv",
+    }
     updated_at = latest_measurement.isoformat() if latest_measurement else uploaded_at
     return {
         "dataset_loaded": loaded,
@@ -138,7 +165,7 @@ def dataset_metadata() -> dict:
         "source": DATASET_URL,
         "license": DATASET_LICENSE,
         "business_data": (
-            "Real anonymized historical Olist records imported from the Kaggle CSV files."
+            "Real anonymized historical Olist records from Kaggle, stored in the shared Render PostgreSQL database."
             if loaded
             else "No business dataset is loaded. Upload the required Olist CSV files to begin."
         ),
@@ -153,6 +180,9 @@ def dataset_metadata() -> dict:
         "live_query_run_count": live_runs,
         "benchmark_count": total - live,
         "table_sizes": sizes,
+        "table_count": sum(1 for count in sizes.values() if count > 0),
+        "total_business_rows": sum(sizes.values()),
+        "pending_additional_files": [table_file_names[name] for name in missing_additional],
         "uploaded_at": uploaded_at,
         "updated_at": updated_at,
     }

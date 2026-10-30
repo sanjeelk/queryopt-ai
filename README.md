@@ -9,26 +9,26 @@ https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
 It contains anonymized historical Brazilian e-commerce orders from 2016–2018. It is a genuine public dataset, but it is not a real-time feed. Query plans and timings become live measurements when someone runs a query against the uploaded records.
 
-Kaggle requires an account and authenticated download for this dataset. Download it from Kaggle, extract the archive, and upload these four CSVs together in the website's **Dataset** page:
+Kaggle requires an account and authenticated download for this dataset. Download it from Kaggle and extract the archive. The four core CSV files are:
 
 - `olist_customers_dataset.csv`
 - `olist_orders_dataset.csv`
 - `olist_order_items_dataset.csv`
 - `olist_products_dataset.csv`
 
-The app imports these core tables and ignores optional Olist files if selected. Keep the combined upload under 100 MB. The source dataset's license is **CC BY-NC-SA 4.0** (attribution, non-commercial use, share-alike). See the Kaggle page for its attribution and license terms. The dataset files are not bundled in this repository; the user downloads them from Kaggle and uploads them.
+The website can then accept the five additional CSV files (geolocation, payments, reviews, sellers, and category translation) in a second upload. Keeping the two uploads separate stays within the 100 MB request limit. The source dataset's license is **CC BY-NC-SA 4.0** (attribution, non-commercial use, share-alike). See the Kaggle page for its attribution and license terms. Dataset files are not bundled in this repository.
 
 ## What the application does
 
-- Imports the four Olist CSV files into PostgreSQL after validating their names and columns.
-- Shows real imported order rows and counts for customers, orders, order items, and products.
+- Imports all nine Olist CSV files into a shared PostgreSQL database after validating their names and columns; the five supplemental tables can be added after the core four.
+- Shows imported order records, per-table row counts, and the Kaggle dataset source.
 - Measures five starter SQL workload shapes against the uploaded records using PostgreSQL `EXPLAIN ANALYZE`.
 - Compares PostgreSQL's default plan with three planner settings and records measured execution time, planner cost, rows, buffer counts, and plan JSON.
 - Collects further measurements as queries are submitted from the Query Optimizer page.
 - Trains and compares Linear Regression, Random Forest, and Gradient Boosting using the application's measured query data. It shows no model score until enough distinct query shapes have been measured.
 - Does not claim performance gains in advance. Timings depend on the uploaded data, database cache, load, and hosting tier.
 
-The query runner accepts one read-only `SELECT` query over the four Olist tables. PostgreSQL's `EXPLAIN ANALYZE` executes the query, so candidate runs use a read-only transaction and a statement timeout. [PostgreSQL EXPLAIN documentation](https://www.postgresql.org/docs/current/sql-explain.html)
+The query runner accepts one read-only `SELECT` query over the nine Olist tables. PostgreSQL's `EXPLAIN ANALYZE` executes the query, so candidate runs use a read-only transaction and a statement timeout. [PostgreSQL EXPLAIN documentation](https://www.postgresql.org/docs/current/sql-explain.html)
 
 ## Project structure
 
@@ -58,8 +58,9 @@ Push the repository to GitHub, then connect that repository to both hosting serv
 
 1. Download **Brazilian E-Commerce Public Dataset by Olist** from the Kaggle page above and extract the ZIP.
 2. Open the deployed website's **Dataset** page.
-3. Choose the four required CSV files together and leave the page open while import and initial query measurements finish.
-4. Use **Query Optimizer** to submit a query. New plan measurements then appear in Dashboard, Performance, History, and Dataset.
+3. Choose the four core CSV files together and leave the page open while they import.
+4. Choose the remaining five Olist CSV files and leave the page open while they import and are benchmarked.
+5. Use **Query Optimizer** to submit a query. New plan measurements then appear in Dashboard, Performance, History, and Dataset.
 
 The Kaggle API guide describes authenticated downloads: https://www.kaggle.com/docs/api
 
@@ -70,7 +71,7 @@ The Kaggle API guide describes authenticated downloads: https://www.kaggle.com/d
 3. Set `VITE_API_BASE_URL=http://localhost:8000` in `frontend/.env.local`.
 4. From `frontend/`, run `npm install` then `npm run dev`.
 
-The API creates empty tables on startup. Upload the four Kaggle CSV files from the Dataset screen; there is no default dataset.
+The API creates empty tables on startup. Upload the four core Kaggle CSV files from the Dataset screen, then add the remaining five files; there is no generated demo data.
 
 ## Original Bolt URL
 

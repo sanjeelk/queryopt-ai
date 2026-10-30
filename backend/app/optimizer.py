@@ -26,11 +26,15 @@ STRATEGIES = {
     "join_friendly": {"enable_nestloop": "off"},
     "parallel_friendly": {"max_parallel_workers_per_gather": "2"},
 }
-ALLOWED_TABLES = {"customers", "products", "orders", "order_items"}
+ALLOWED_TABLES = {
+    "customers", "products", "orders", "order_items", "geolocation",
+    "order_payments", "order_reviews", "sellers",
+    "product_category_name_translation",
+}
 ALLOWED_ANONYMOUS_FUNCTIONS = {"COALESCE", "NULLIF", "GREATEST", "LEAST"}
 ALLOWED_BUILTIN_FUNCTIONS = {
     "COUNT", "SUM", "AVG", "MIN", "MAX", "ROUND", "ABS", "LOWER", "UPPER",
-    "COALESCE", "NULLIF", "GREATEST", "LEAST",
+    "COALESCE", "NULLIF", "GREATEST", "LEAST", "CAST",
 }
 MAX_QUERY_CHARS = 4_000
 STATEMENT_TIMEOUT_MS = 1_800
@@ -52,10 +56,10 @@ def validate_query(sql: str) -> tuple[str, str]:
         raise ValueError("Common table expressions are disabled in this query runner.")
     tables = list(tree.find_all(exp.Table))
     if not tables:
-        raise ValueError("Query must read from customers, products, orders, or order_items.")
+        raise ValueError("Query must read from one of the Olist dataset tables.")
     for table in tables:
         if table.name.lower() not in ALLOWED_TABLES or table.db or table.catalog:
-            raise ValueError("Queries can read only customers, products, orders, and order_items.")
+            raise ValueError("Queries can read only tables in the Olist dataset.")
     for function in tree.find_all(exp.Anonymous):
         if function.name.upper() not in ALLOWED_ANONYMOUS_FUNCTIONS:
             raise ValueError(f"Function {function.name} is not available in the query runner.")
@@ -311,7 +315,7 @@ def analyze_query(sql: str) -> dict:
         "plan": selected_result["plan"],
         "result_preview": _sample_rows(normalized),
         "measured_at": datetime.now(timezone.utc).isoformat(),
-        "note": "Execution times are measured on the uploaded Olist data and vary with cache, load, and hosting tier.",
+        "note": "Execution times are measured on the Olist data in the shared PostgreSQL database and vary with cache, load, and hosting tier.",
     }
 
 
