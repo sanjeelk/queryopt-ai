@@ -10,12 +10,24 @@ from sqlalchemy import func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
-from .db import app_meta, customers, engine, order_items, orders, products
+from .db import (
+    app_meta,
+    customers,
+    engine,
+    geolocation,
+    order_items,
+    order_payments,
+    order_reviews,
+    orders,
+    products,
+    product_category_name_translation,
+    sellers,
+)
 
 MAX_TOTAL_UPLOAD_BYTES = 100 * 1024 * 1024
 BATCH_SIZE = 2_000
 
-REQUIRED_COLUMNS = {
+CORE_COLUMNS = {
     "olist_customers_dataset.csv": {
         "customer_id", "customer_unique_id", "customer_zip_code_prefix",
         "customer_city", "customer_state",
@@ -35,31 +47,55 @@ REQUIRED_COLUMNS = {
         "product_length_cm", "product_height_cm", "product_width_cm",
     },
 }
-OPTIONAL_KAGGLE_FILES = {
-    "olist_geolocation_dataset.csv",
-    "olist_order_payments_dataset.csv",
-    "olist_order_reviews_dataset.csv",
-    "olist_sellers_dataset.csv",
-    "product_category_name_translation.csv",
+SUPPLEMENTAL_COLUMNS = {
+    "olist_geolocation_dataset.csv": {
+        "geolocation_zip_code_prefix", "geolocation_lat", "geolocation_lng",
+        "geolocation_city", "geolocation_state",
+    },
+    "olist_order_payments_dataset.csv": {
+        "order_id", "payment_sequential", "payment_type",
+        "payment_installments", "payment_value",
+    },
+    "olist_order_reviews_dataset.csv": {
+        "review_id", "order_id", "review_score", "review_comment_title",
+        "review_comment_message", "review_creation_date", "review_answer_timestamp",
+    },
+    "olist_sellers_dataset.csv": {
+        "seller_id", "seller_zip_code_prefix", "seller_city", "seller_state",
+    },
+    "product_category_name_translation.csv": {
+        "product_category_name", "product_category_name_english",
+    },
 }
 TABLES = {
     "olist_customers_dataset.csv": customers,
     "olist_products_dataset.csv": products,
     "olist_orders_dataset.csv": orders,
     "olist_order_items_dataset.csv": order_items,
+    "olist_geolocation_dataset.csv": geolocation,
+    "olist_order_payments_dataset.csv": order_payments,
+    "olist_order_reviews_dataset.csv": order_reviews,
+    "olist_sellers_dataset.csv": sellers,
+    "product_category_name_translation.csv": product_category_name_translation,
 }
+REQUIRED_COLUMNS = CORE_COLUMNS | SUPPLEMENTAL_COLUMNS
+CORE_FILES = set(CORE_COLUMNS)
 INTEGER_COLUMNS = {
     "customer_zip_code_prefix", "product_name_lenght",
     "product_description_lenght", "product_photos_qty", "order_item_id",
+    "geolocation_zip_code_prefix", "payment_sequential",
+    "payment_installments", "review_score", "seller_zip_code_prefix",
 }
 FLOAT_COLUMNS = {
     "product_weight_g", "product_length_cm", "product_height_cm",
     "product_width_cm", "price", "freight_value",
+    "geolocation_lat", "geolocation_lng", "payment_value",
 }
 DATETIME_COLUMNS = {
     "order_purchase_timestamp", "order_approved_at",
     "order_delivered_carrier_date", "order_delivered_customer_date",
     "order_estimated_delivery_date", "shipping_limit_date",
+    "review_creation_date", "review_answer_timestamp",
 }
 
 
@@ -139,7 +175,8 @@ def _insert_file(connection, upload: UploadFile, filename: str) -> int:
             }
             # Preserve every declared table column; optional source fields may be blank.
             for column in table.columns:
-                row.setdefault(column.name, None)
+                if column.name not in row and column.autoincrement is not True:
+                    row[column.name] = None
             batch.append(row)
             if len(batch) >= BATCH_SIZE:
                 connection.execute(insert(table), batch)
@@ -161,10 +198,10 @@ def _insert_file(connection, upload: UploadFile, filename: str) -> int:
 
 
 def import_olist_files(files: list[UploadFile]) -> dict:
-    """Import the four required Kaggle tables once; never seed synthetic rows."""
+    """Import real Olist tables once, allowing the five supplemental files later."""
     supplied: dict[str, UploadFile] = {}
     total_size = 0
-    accepted = set(REQUIRED_COLUMNS) | OPTIONAL_KAGGLE_FILES
+    accepted = set(REQUIRED_COLUMNS)
 
     for upload in files:
         filename = _safe_filename(upload.filename)
@@ -177,18 +214,15 @@ def import_olist_files(files: list[UploadFile]) -> dict:
         supplied[filename] = upload
         total_size += _file_size(upload)
 
-    missing_files = sorted(set(REQUIRED_COLUMNS) - supplied.keys())
-    if missing_files:
-        raise ValueError(
-            "Select all four required files: " + ", ".join(missing_files) + "."
-        )
+    if not supplied:
+        raise ValueError("Choose at least one Olist Kaggle CSV file.")
     if total_size > MAX_TOTAL_UPLOAD_BYTES:
         raise ValueError(
-            "Selected files exceed the 100 MB upload limit. Choose only the four required CSV files."
+            "Selected files exceed the 100 MB upload limit. Upload the core files first, then add the remaining Olist files."
         )
 
-    for filename in REQUIRED_COLUMNS:
-        _check_headers(supplied[filename], filename)
+    for filename, upload in supplied.items():
+        _check_headers(upload, filename)
 
     counts = {}
     try:
@@ -201,24 +235,40 @@ def import_olist_files(files: list[UploadFile]) -> dict:
                         select(func.count()).select_from(table)
                     ).scalar_one()
                 )
-                for table in (customers, products, orders, order_items)
+                for table in TABLES.values()
             }
-            if any(existing.values()):
-                raise ValueError(
-                    "This database already contains a dataset. A new upload was not applied."
-                )
+            core_loaded = all(existing[TABLES[filename].name] > 0 for filename in CORE_FILES)
+            if core_loaded:
+                if CORE_FILES.intersection(supplied):
+                    raise ValueError("The core Olist tables are already loaded. Choose only the five additional Olist CSV files.")
+                already_loaded = [
+                    TABLES[filename].name
+                    for filename in supplied
+                    if existing[TABLES[filename].name] > 0
+                ]
+                if already_loaded:
+                    raise ValueError("These Olist tables are already loaded: " + ", ".join(already_loaded) + ".")
+            else:
+                missing_files = sorted(CORE_FILES - supplied.keys())
+                if missing_files:
+                    raise ValueError("Select all four required core files: " + ", ".join(missing_files) + ".")
+                if any(existing.values()):
+                    raise ValueError("The database has a partial Olist import. No new files were applied.")
 
-            for filename, table in TABLES.items():
-                counts[table.name] = _insert_file(
-                    connection, supplied[filename], filename
-                )
+            for filename, upload in supplied.items():
+                table = TABLES[filename]
+                counts[table.name] = _insert_file(connection, upload, filename)
 
             from datetime import datetime, timezone
 
             uploaded_at = datetime.now(timezone.utc).isoformat()
+            existing_uploaded_at = connection.execute(
+                select(app_meta.c.value).where(app_meta.c.key == "dataset_uploaded_at")
+            ).scalar_one_or_none()
             metadata_rows = [
                 {"key": "dataset_name", "value": "Brazilian E-Commerce Public Dataset by Olist"},
-                {"key": "dataset_uploaded_at", "value": uploaded_at},
+                {"key": "dataset_uploaded_at", "value": existing_uploaded_at or uploaded_at},
+                {"key": "dataset_last_updated_at", "value": uploaded_at},
                 {"key": "dataset_license", "value": "CC BY-NC-SA 4.0"},
                 {"key": "dataset_source", "value": "https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce"},
             ]
@@ -231,11 +281,11 @@ def import_olist_files(files: list[UploadFile]) -> dict:
                         set_={"value": item["value"]},
                     )
                 )
-            for table_name in ("customers", "products", "orders", "order_items"):
+            for table_name in counts:
                 connection.exec_driver_sql(f"ANALYZE {table_name}")
     except IntegrityError as error:
         raise ValueError(
-            "The CSV files contain duplicate or invalid IDs. Check that all four files come from the same Olist download."
+            "The CSV files contain duplicate or invalid IDs. Check that the files come from the same Olist download."
         ) from error
 
     return {

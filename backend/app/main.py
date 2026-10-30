@@ -117,8 +117,8 @@ def get_dataset(limit: int = Query(default=100, ge=1, le=500)):
         "business_preview": business_preview() if info["dataset_loaded"] else [],
         "items": dataset_rows(limit),
         "notes": (
-            "Business rows come from the uploaded Olist CSV files. Query plans, costs, "
-            "buffers, and execution times are collected from PostgreSQL at runtime."
+            "The Kaggle Olist business tables are stored in the shared Render PostgreSQL database, so every device sees the same records. "
+            "Query plans, costs, buffers, and execution times are collected from PostgreSQL at runtime."
             if info["dataset_loaded"]
             else "No business rows or benchmark results are preloaded. Upload the four Olist CSV files to begin."
         ),
@@ -139,7 +139,7 @@ def upload_dataset(files: list[UploadFile] = File(...)):
         benchmark_records = 0
 
     return {
-        "message": "Olist dataset imported successfully.",
+        "message": "Olist Kaggle CSV tables imported successfully.",
         "dataset": dataset_metadata(),
         "uploaded_table_sizes": imported["table_sizes"],
         "benchmark_measurements_added": benchmark_records,

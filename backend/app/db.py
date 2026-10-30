@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
+    BigInteger,
     Column,
     DateTime,
     Float,
@@ -104,6 +105,63 @@ order_items = Table(
 Index("order_items_order_idx", order_items.c.order_id)
 Index("order_items_product_idx", order_items.c.product_id)
 Index("order_items_seller_idx", order_items.c.seller_id)
+
+order_payments = Table(
+    "order_payments",
+    metadata,
+    Column("order_id", String(36), nullable=False),
+    Column("payment_sequential", Integer, nullable=False),
+    Column("payment_type", String(40), nullable=False),
+    Column("payment_installments", Integer, nullable=False),
+    Column("payment_value", Float, nullable=False),
+    PrimaryKeyConstraint("order_id", "payment_sequential"),
+)
+Index("order_payments_type_idx", order_payments.c.payment_type)
+
+order_reviews = Table(
+    "order_reviews",
+    metadata,
+    Column("review_id", String(36), nullable=False),
+    Column("order_id", String(36), nullable=False),
+    Column("review_score", Integer, nullable=False),
+    Column("review_comment_title", Text),
+    Column("review_comment_message", Text),
+    Column("review_creation_date", DateTime(timezone=False)),
+    Column("review_answer_timestamp", DateTime(timezone=False)),
+    PrimaryKeyConstraint("review_id", "order_id"),
+)
+Index("order_reviews_order_idx", order_reviews.c.order_id)
+Index("order_reviews_score_idx", order_reviews.c.review_score)
+
+sellers = Table(
+    "sellers",
+    metadata,
+    Column("seller_id", String(36), primary_key=True),
+    Column("seller_zip_code_prefix", Integer),
+    Column("seller_city", String(120)),
+    Column("seller_state", String(2)),
+)
+Index("sellers_state_idx", sellers.c.seller_state)
+
+product_category_name_translation = Table(
+    "product_category_name_translation",
+    metadata,
+    Column("product_category_name", String(120), primary_key=True),
+    Column("product_category_name_english", String(120), nullable=False),
+)
+
+geolocation = Table(
+    "geolocation",
+    metadata,
+    Column("geolocation_id", BigInteger, primary_key=True, autoincrement=True),
+    Column("geolocation_zip_code_prefix", Integer, nullable=False),
+    Column("geolocation_lat", Float, nullable=False),
+    Column("geolocation_lng", Float, nullable=False),
+    Column("geolocation_city", String(120)),
+    Column("geolocation_state", String(2)),
+)
+Index("geolocation_zip_idx", geolocation.c.geolocation_zip_code_prefix)
+Index("geolocation_state_idx", geolocation.c.geolocation_state)
 
 query_measurements = Table(
     "query_measurements",

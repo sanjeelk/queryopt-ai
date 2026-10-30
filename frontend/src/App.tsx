@@ -24,7 +24,7 @@ const examples = [
   { name: "Simple Filter", sql: "SELECT * FROM customers WHERE customer_state = 'SP' LIMIT 50;" },
   { name: "Customer Orders", sql: "SELECT c.customer_id, c.customer_state, o.order_id, o.order_status FROM customers c JOIN orders o ON c.customer_id = o.customer_id LIMIT 50;" },
   { name: "Aggregation", sql: "SELECT order_status, COUNT(*) AS order_count FROM orders GROUP BY order_status;" },
-  { name: "Multi Join", sql: "SELECT c.customer_state, p.product_category_name, i.price FROM customers c JOIN orders o ON c.customer_id = o.customer_id JOIN order_items i ON o.order_id = i.order_id JOIN products p ON i.product_id = p.product_id LIMIT 100;" },
+  { name: "Multi Join", sql: "SELECT r.review_score, p.payment_type, COUNT(*) AS order_count FROM order_reviews r JOIN order_payments p ON p.order_id = r.order_id GROUP BY r.review_score, p.payment_type ORDER BY order_count DESC LIMIT 50;" },
   { name: "Analytical Query", sql: "SELECT c.customer_state, COUNT(DISTINCT o.order_id) AS order_count, SUM(i.price + i.freight_value) AS gross_value FROM customers c JOIN orders o ON c.customer_id = o.customer_id JOIN order_items i ON o.order_id = i.order_id GROUP BY c.customer_state ORDER BY gross_value DESC;" },
 ];
 
@@ -192,7 +192,7 @@ function Dashboard({ overview, history, models, dataset }: { overview: any; hist
   const avgTime = history.length ? history.reduce((sum, run) => sum + Number(run.recommended?.execution_ms || 0), 0) / history.length : null;
   const avgImprovement = history.length ? history.reduce((sum, run) => sum + run.improvement, 0) / history.length : null;
   return <>
-    <div className="prototype-banner"><span className="live-dot" />{hasDataset ? "Olist dataset loaded" : "Waiting for dataset upload"}<span className="banner-divider">·</span>{dataset?.measurement_count ?? 0} measured plan records <span className="banner-note">{hasDataset ? "Query timings are measured live by PostgreSQL." : "Open Dataset to upload the four Kaggle CSV files."}</span></div>
+    <div className="prototype-banner"><span className="live-dot" />{hasDataset ? `Olist dataset loaded · ${dataset?.table_count ?? 4} tables` : "Waiting for dataset upload"}<span className="banner-divider">·</span>{dataset?.measurement_count ?? 0} measured plan records <span className="banner-note">{hasDataset ? "Query timings are measured live by PostgreSQL." : "Open Dataset to upload the Kaggle CSV files."}</span></div>
     <div className="metrics-grid">
       <MetricCard icon={Database} label="Total Queries Optimized" value={String(totalRuns)} caption="Live query runs" />
       <MetricCard icon={Trophy} label="Best ML Model" value={trained ? models.best_model : hasDataset ? "Warming up" : "Awaiting data"} caption={trained ? `RMSE ${fmt(randomForest?.rmse, 3)} ms` : `${models?.query_shapes || 0} query shapes observed`} accent="green" />
@@ -300,6 +300,7 @@ function DatasetPage({ dataset, onUpload, uploading, uploadMessage, uploadError 
   const businessColumns = ["order_id", "customer_id", "order_status", "order_purchase_timestamp", "order_estimated_delivery_date"];
   const businessRows = Object.values(dataset?.table_sizes || {}).reduce((sum: number, count: any) => sum + Number(count || 0), 0);
   const loaded = Boolean(dataset?.dataset_loaded);
+  const pendingFiles: string[] = dataset?.pending_additional_files || [];
   return <>
     <div className="metrics-grid dataset-metrics">
       <MetricCard icon={Database} label="Dataset Size" value={String(businessRows)} caption="Imported Olist source rows" />
@@ -312,16 +313,16 @@ function DatasetPage({ dataset, onUpload, uploading, uploadMessage, uploadError 
         <div><b>Dataset source</b><p><a href={dataset?.source || "https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce"} target="_blank" rel="noreferrer">{dataset?.dataset_name || "Brazilian E-Commerce Public Dataset by Olist"}</a></p><small>Historical anonymized e-commerce orders · License: {dataset?.license || "CC BY-NC-SA 4.0"}</small></div>
         <span className={`source-live ${loaded ? "" : "pending"}`}><i />{loaded ? "Loaded" : "Upload needed"}</span>
       </div>
-      <div className="dataset-counts"><span>Customers {dataset?.table_sizes?.customers ?? 0}</span><span>Orders {dataset?.table_sizes?.orders ?? 0}</span><span>Order items {dataset?.table_sizes?.order_items ?? 0}</span><span>Products {dataset?.table_sizes?.products ?? 0}</span><span>Uploaded {relative(dataset?.uploaded_at)}</span></div>
+      <div className="dataset-counts">{Object.entries(dataset?.table_sizes || {}).map(([name, count]: [string, any]) => <span key={name}>{name.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} {count}</span>)}<span>Tables loaded {dataset?.table_count ?? 0} / 9</span><span>Uploaded {relative(dataset?.uploaded_at)}</span></div>
     </Card>
     <Card>
       <PanelHeading title="Load the Kaggle CSV files" icon={Upload} />
-      <p className="upload-note">Download <b>Brazilian E-Commerce Public Dataset by Olist</b> from Kaggle, then select these four files together. You can leave the other Kaggle files unselected.</p>
+      <p className="upload-note">Download <b>Brazilian E-Commerce Public Dataset by Olist</b> from Kaggle. Add the remaining CSV files here to make all nine related tables available for cross-device queries.</p>
       <div className="upload-row">
-        {loaded ? <span className="muted">Dataset loaded successfully. This database accepts one initial dataset upload.</span> : <label className={`primary-button dataset-upload-button ${uploading ? "is-loading" : ""}`} htmlFor="olist-files"><Upload size={14} />{uploading ? "Uploading and measuring…" : "Choose CSV files"}<input id="olist-files" className="file-input" type="file" accept=".csv,text/csv" multiple disabled={uploading} onChange={(event) => { onUpload(event.target.files); event.currentTarget.value = ""; }} /></label>}
+        {pendingFiles.length ? <label className={`primary-button dataset-upload-button ${uploading ? "is-loading" : ""}`} htmlFor="olist-files"><Upload size={14} />{uploading ? "Uploading and measuring…" : loaded ? "Add remaining CSV files" : "Choose CSV files"}<input id="olist-files" className="file-input" type="file" accept=".csv,text/csv" multiple disabled={uploading} onChange={(event) => { onUpload(event.target.files); event.currentTarget.value = ""; }} /></label> : <span className="muted">All nine Olist tables are loaded in the shared database.</span>}
         <span className="upload-size">Maximum combined upload: 100 MB</span>
       </div>
-      <div className="required-files">{(dataset?.upload_required_files || ["olist_customers_dataset.csv", "olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_products_dataset.csv"]).map((name: string) => <code key={name}>{name}</code>)}</div>
+      <div className="required-files">{(loaded ? pendingFiles : (dataset?.upload_required_files || ["olist_customers_dataset.csv", "olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_products_dataset.csv"])).map((name: string) => <code key={name}>{name}</code>)}</div>
       {uploading && <p className="upload-status">Importing source rows, updating PostgreSQL statistics, and measuring the initial SQL workload. Keep this page open.</p>}
       {uploadMessage && <p className="upload-status success-text">{uploadMessage}</p>}
       {uploadError && <p className="upload-status error-text">{uploadError}</p>}
