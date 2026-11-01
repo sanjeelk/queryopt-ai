@@ -16,7 +16,11 @@ services:
           name: queryopt-db
           property: connectionString
       - key: CORS_ORIGINS
-        value: http://localhost:5173,http://127.0.0.1:5173
+        value: http://localhost:5173,http://127.0.0.1:5173,https://queryopt-ai.lovable.app
+      - key: SUPABASE_FUNCTION_URL
+        value: https://bnupdkmupptzmowblmtm.supabase.co/functions/v1/queryopt-api
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_tl-uCrK3w7LQSmaqANICiQ_zmCAjsQk
 
 databases:
   - name: queryopt-db
