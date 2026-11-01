@@ -457,8 +457,9 @@ const conflicts: Record<string, string> = {
 async function handle(req: Request, ctx: { supabaseAdmin: any }) {
   const db = ctx.supabaseAdmin;
   const url = new URL(req.url);
-  const prefix = "/functions/v1/queryopt-api";
-  const path = url.pathname.includes(prefix) ? url.pathname.slice(url.pathname.indexOf(prefix) + prefix.length) || "/" : url.pathname;
+  const functionMarker = "/queryopt-api";
+  const markerIndex = url.pathname.lastIndexOf(functionMarker);
+  const path = markerIndex >= 0 ? url.pathname.slice(markerIndex + functionMarker.length) || "/" : url.pathname;
 
   if (req.method === "GET" && path === "/health") {
     const { error } = await db.from("app_meta").select("key").limit(1);
@@ -555,7 +556,7 @@ async function handle(req: Request, ctx: { supabaseAdmin: any }) {
     const body = await bodyJson(req);
     const table = String(body.table || "");
     const rows = body.rows;
-    if (!columnsByTable[table] || !Array.isArray(rows) || rows.length < 1 || rows.length > 1000) {
+    if (!columnsByTable[table] || !Array.isArray(rows) || rows.length < 1 || rows.length > 4000) {
       return fail("Upload batch is not valid.");
     }
     if (typeof body.upload_id !== "string" || !/^[0-9a-f-]{36}$/i.test(body.upload_id)) return fail("Upload session is invalid.");
