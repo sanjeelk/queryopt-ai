@@ -581,7 +581,7 @@ async function handle(req: Request, ctx: { supabaseAdmin: any }) {
     const result = await db.rpc("finish_olist_import", { p_import_id: body.upload_id });
     if (result.error) throw result.error;
     const analyze = await db.rpc("analyze_olist_tables");
-    if (analyze.error) throw analyze.error;
+    if (analyze.error) console.warn("Olist import completed; automatic table statistics refresh was skipped:", analyze.error.message);
     return json({ message: "Olist dataset imported successfully.", dataset: await datasetMetadata(db), uploaded_table_sizes: result.data?.table_sizes || {} });
   }
 
