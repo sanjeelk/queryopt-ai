@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+import httpx
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -61,6 +64,71 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def proxy_shared_supabase_api(request: Request, call_next):
+    """Keep the existing Render URL while serving the shared Supabase database."""
+    function_url = os.getenv("SUPABASE_FUNCTION_URL", "").rstrip("/")
+    publishable_key = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+    path = request.url.path
+    should_proxy = path == "/health" or path.startswith("/api/")
+    if not function_url or not publishable_key or not should_proxy or path == "/api/dataset/upload":
+        return await call_next(request)
+
+    origin = request.headers.get("origin", "")
+    allowed_origins = {
+        value.strip()
+        for value in os.getenv("CORS_ORIGINS", "").split(",")
+        if value.strip()
+    }
+    origin_allowed = origin in allowed_origins or bool(
+        re.fullmatch(r"https://[a-zA-Z0-9-]+\.vercel\.app", origin)
+    )
+    cors_headers = {}
+    if origin_allowed:
+        cors_headers = {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, apikey, x-client-info",
+            "Access-Control-Max-Age": "86400",
+            "Vary": "Origin",
+        }
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=cors_headers)
+
+    target = f"{function_url}{path}"
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    request_headers = {"apikey": publishable_key}
+    content_type = request.headers.get("content-type")
+    if content_type:
+        request_headers["content-type"] = content_type
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
+            upstream = await client.request(
+                request.method,
+                target,
+                headers=request_headers,
+                content=await request.body(),
+            )
+    except httpx.HTTPError:
+        return Response(
+            content=b'{"detail":"The shared query service is temporarily unavailable."}',
+            status_code=502,
+            media_type="application/json",
+            headers=cors_headers,
+        )
+
+    response_headers = dict(cors_headers)
+    for header in ("content-type", "cache-control"):
+        if upstream.headers.get(header):
+            response_headers[header] = upstream.headers[header]
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=response_headers,
+    )
 
 
 class AnalyzeRequest(BaseModel):
@@ -117,8 +185,8 @@ def get_dataset(limit: int = Query(default=100, ge=1, le=500)):
         "business_preview": business_preview() if info["dataset_loaded"] else [],
         "items": dataset_rows(limit),
         "notes": (
-            "The Kaggle Olist business tables are stored in the shared Render PostgreSQL database, so every device sees the same records. "
-            "Query plans, costs, buffers, and execution times are collected from PostgreSQL at runtime."
+            "Business rows come from the uploaded Olist CSV files. Query plans, costs, "
+            "buffers, and execution times are collected from PostgreSQL at runtime."
             if info["dataset_loaded"]
             else "No business rows or benchmark results are preloaded. Upload the four Olist CSV files to begin."
         ),
@@ -139,7 +207,7 @@ def upload_dataset(files: list[UploadFile] = File(...)):
         benchmark_records = 0
 
     return {
-        "message": "Olist Kaggle CSV tables imported successfully.",
+        "message": "Olist dataset imported successfully.",
         "dataset": dataset_metadata(),
         "uploaded_table_sizes": imported["table_sizes"],
         "benchmark_measurements_added": benchmark_records,
