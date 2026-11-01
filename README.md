@@ -1,80 +1,57 @@
 # QueryOpt AI
 
-This repository contains the QueryOpt AI website and API for the project synopsis, **Predictive Database Query Optimization Using Machine Learning**. The existing dark dashboard layout and navigation are retained. The application starts without business data and does not generate demo or synthetic rows.
+**Predictive Database Query Optimization Using Machine Learning** keeps the existing QueryOpt AI dashboard UI and connects it to a shared Supabase PostgreSQL database.
 
-## Selected source dataset
+## Production architecture
 
-**Brazilian E-Commerce Public Dataset by Olist** on Kaggle:  
-https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+- `frontend/`: React + Vite dashboard, published on Lovable or Vercel.
+- `supabase/functions/queryopt-api/`: Supabase Edge Function API. The browser sends the public publishable key; privileged database work stays in the Edge Function.
+- `supabase/migrations/`: database tables, indexes, row-level security, import controls, and safe query-plan functions.
+- Supabase PostgreSQL: shared storage for the Olist source tables and real query-plan measurements. Data remains available when another device opens the same site.
 
-It contains anonymized historical Brazilian e-commerce orders from 2016–2018. It is a genuine public dataset, but it is not a real-time feed. Query plans and timings become live measurements when someone runs a query against the uploaded records.
+The existing FastAPI/Render files are kept for the original deployment path. The current Supabase-backed frontend uses the Edge Function and does not need a Render API URL.
 
-Kaggle requires an account and authenticated download for this dataset. Download it from Kaggle and extract the archive. The four core CSV files are:
+## Dataset
+
+The website uses the real **Brazilian E-Commerce Public Dataset by Olist** from Kaggle: [olistbr/brazilian-ecommerce](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Its records cover 2016–2018. This is historical data, not a live order feed. SQL plans, query execution times, and buffer reads are measured live against the shared PostgreSQL database.
+
+Upload the four core CSV files together from the Dataset page:
 
 - `olist_customers_dataset.csv`
 - `olist_orders_dataset.csv`
 - `olist_order_items_dataset.csv`
 - `olist_products_dataset.csv`
 
-The website can then accept the five additional CSV files (geolocation, payments, reviews, sellers, and category translation) in a second upload. Keeping the two uploads separate stays within the 100 MB request limit. The source dataset's license is **CC BY-NC-SA 4.0** (attribution, non-commercial use, share-alike). See the Kaggle page for its attribution and license terms. Dataset files are not bundled in this repository.
+Then upload any or all remaining five CSV files as a second batch:
 
-## What the application does
+- `olist_order_payments_dataset.csv`
+- `olist_order_reviews_dataset.csv`
+- `olist_sellers_dataset.csv`
+- `product_category_name_translation.csv`
+- `olist_geolocation_dataset.csv`
 
-- Imports all nine Olist CSV files into a shared PostgreSQL database after validating their names and columns; the five supplemental tables can be added after the core four.
-- Shows imported order records, per-table row counts, and the Kaggle dataset source.
-- Measures five starter SQL workload shapes against the uploaded records using PostgreSQL `EXPLAIN ANALYZE`.
-- Compares PostgreSQL's default plan with three planner settings and records measured execution time, planner cost, rows, buffer counts, and plan JSON.
-- Collects further measurements as queries are submitted from the Query Optimizer page.
-- Trains and compares Linear Regression, Random Forest, and Gradient Boosting using the application's measured query data. It shows no model score until enough distinct query shapes have been measured.
-- Does not claim performance gains in advance. Timings depend on the uploaded data, database cache, load, and hosting tier.
+The second upload keeps the large geolocation file within the site's 100 MB per-upload limit. Imported files are stored in Supabase, not in the browser, so other devices see the same data. The Kaggle dataset license is **CC BY-NC-SA 4.0**; follow its attribution, non-commercial, and share-alike terms.
 
-The query runner accepts one read-only `SELECT` query over the nine Olist tables. PostgreSQL's `EXPLAIN ANALYZE` executes the query, so candidate runs use a read-only transaction and a statement timeout. [PostgreSQL EXPLAIN documentation](https://www.postgresql.org/docs/current/sql-explain.html)
+## Query analysis and ML
 
-## Project structure
+1. The user submits one `SELECT` query against the Olist tables.
+2. The API checks the query and measures four PostgreSQL planner settings with `EXPLAIN ANALYZE` and buffer statistics.
+3. It saves each plan, actual runtime, estimated cost, row count, and query features in `query_measurements`.
+4. Linear Regression, Decision Tree, Random Forest, and Gradient Boosting are compared using validation grouped by query shape. They stay in warm-up until there are enough real measurements.
+5. Once trained, the Random Forest predicts each candidate's runtime and recommends one plan. During warm-up, PostgreSQL's default plan remains the recommendation.
 
-- `frontend/`: Vite + React website.
-- `backend/`: FastAPI API, PostgreSQL schema, CSV importer, query measurement, and model evaluation.
-- `render.yaml`: Render API and PostgreSQL blueprint.
-- `frontend/vercel.json`: Vercel build settings.
+Query execution is read-only, limited to Olist tables and approved SQL functions, and protected by a database statement timeout. Timings vary with cache, concurrent load, and the Supabase plan. The application does not claim an improvement before it has measurements.
 
-## Deploy with GitHub, Render, and Vercel
+## Deploy the frontend
 
-Push the repository to GitHub, then connect that repository to both hosting services.
+The Supabase project schema and `queryopt-api` Edge Function are deployed separately through Supabase. The frontend's public production settings are in `frontend/.env.production`; the key there is a publishable browser key, not a secret server key.
 
-### Render
-
-1. In Render, choose **New → Blueprint** and select this repository's `render.yaml`.
-2. Render creates the API and PostgreSQL database. Wait for the API's `/health` route to return `status: ok`.
-3. The included free database is suitable for short demos. Render free PostgreSQL databases expire after 30 days; select a persistent database plan for longer use.
-
-### Vercel
-
-1. Import the same GitHub repository in Vercel.
-2. Set **Root Directory** to `frontend`.
-3. Set `VITE_API_BASE_URL` to the deployed Render API URL, without a trailing slash.
-4. Deploy. The API allows Vercel preview and production subdomains; use `CORS_ORIGINS` on Render for any custom frontend domain.
-
-### Upload the dataset
-
-1. Download **Brazilian E-Commerce Public Dataset by Olist** from the Kaggle page above and extract the ZIP.
-2. Open the deployed website's **Dataset** page.
-3. Choose the four core CSV files together and leave the page open while they import.
-4. Choose the remaining five Olist CSV files and leave the page open while they import and are benchmarked.
-5. Use **Query Optimizer** to submit a query. New plan measurements then appear in Dashboard, Performance, History, and Dataset.
-
-The Kaggle API guide describes authenticated downloads: https://www.kaggle.com/docs/api
+For Vercel, import this repository, set **Root Directory** to `frontend`, and deploy with the included Vite configuration. For Lovable, connect the project to this repository and publish after the GitHub changes sync. The existing visual dashboard and navigation stay in place.
 
 ## Local development
 
-1. Create a PostgreSQL database and set `DATABASE_URL` for the backend.
-2. From `backend/`, install `requirements.txt` and run `uvicorn app.main:app --reload --port 8000`.
-3. Set `VITE_API_BASE_URL=http://localhost:8000` in `frontend/.env.local`.
-4. From `frontend/`, run `npm install` then `npm run dev`.
+1. Copy the two `VITE_SUPABASE_*` values from `frontend/.env.production` into `frontend/.env.local`.
+2. From `frontend/`, run `npm install` and `npm run dev`.
 
-The API creates empty tables on startup. Upload the four core Kaggle CSV files from the Dataset screen, then add the remaining five files; there is no generated demo data.
-
-## Original Bolt URL
-
-The public URL `https://queryopt-ai-94rk.bolt.host/` does not provide access to the original Bolt source or its hosting account. This repository preserves the UI layout and deploys as a separate Vercel site, so it will have a new URL.
-
+Do not put the Supabase secret/service-role key in the frontend or commit it to GitHub. The Edge Function uses its server-side Supabase credentials.
 
