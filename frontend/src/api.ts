@@ -9,21 +9,29 @@ async function request<T>(path: string, init?: RequestInit, retry = false): Prom
   const headers = new Headers(init?.headers);
   headers.set("apikey", SUPABASE_KEY);
   if (!(init?.body instanceof FormData) && init?.body !== undefined) headers.set("Content-Type", "application/json");
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}${path}`, { ...init, headers, cache: "no-store" });
-  } catch {
-    throw new Error("Could not connect to QueryOpt AI. Check the internet connection and try again.");
-  }
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    if (retry && [429, 502, 503, 504].includes(response.status)) {
-      await new Promise((resolve) => window.setTimeout(resolve, 700));
-      return request<T>(path, init, false);
+  const attempts = retry ? 4 : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${path}`, { ...init, headers, cache: "no-store" });
+    } catch {
+      if (attempt + 1 < attempts) {
+        await new Promise((resolve) => window.setTimeout(resolve, 800 * (attempt + 1)));
+        continue;
+      }
+      throw new Error("Could not connect to QueryOpt AI. Check the internet connection and try again.");
     }
-    throw new Error(body.detail || `API request failed (${response.status})`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      if (retry && [429, 502, 503, 504].includes(response.status) && attempt + 1 < attempts) {
+        await new Promise((resolve) => window.setTimeout(resolve, 800 * (attempt + 1)));
+        continue;
+      }
+      throw new Error(body.detail || `API request failed (${response.status})`);
+    }
+    return response.json() as Promise<T>;
   }
-  return response.json() as Promise<T>;
+  throw new Error("Could not connect to QueryOpt AI. Check the internet connection and try again.");
 }
 
 const fileToTable: Record<string, string> = {
@@ -87,7 +95,7 @@ function* csvRows(text: string): Generator<string[]> {
   }
 }
 
-function* csvBatches(text: string, table: string, size = 900): Generator<Record<string, unknown>[]> {
+function* csvBatches(text: string, table: string, size = 3000): Generator<Record<string, unknown>[]> {
   const records = csvRows(text);
   const headerRow = records.next();
   if (headerRow.done) throw new Error("A selected CSV is empty.");
